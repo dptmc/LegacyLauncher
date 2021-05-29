@@ -53,6 +53,7 @@ public class LaunchClassLoader extends URLClassLoader {
         addClassLoaderExclusion("org.lwjgl.");
         addClassLoaderExclusion("org.apache.logging.");
         addClassLoaderExclusion("net.minecraft.launchwrapper.");
+        addClassLoaderExclusion("org.fusesource.jansi.");//used by Log4J
 
         // transformer exclusions
         addTransformerExclusion("javax.");
@@ -133,6 +134,10 @@ public class LaunchClassLoader extends URLClassLoader {
             final String fileName = untransformedName.replace('.', '/').concat(".class");
             URLConnection urlConnection = findCodeSourceConnectionFor(fileName);
 
+            if (urlConnection == null) {
+                throw new ClassNotFoundException(name);
+            }
+
             CodeSigner[] signers = null;
 
             if (lastDot > -1 && !untransformedName.startsWith("net.minecraft.")) {
@@ -145,10 +150,10 @@ public class LaunchClassLoader extends URLClassLoader {
                         final JarEntry entry = jarFile.getJarEntry(fileName);
 
                         Package pkg = getPackage(packageName);
-                        getClassBytes(untransformedName);
+                        //getClassBytes(untransformedName);
                         signers = entry.getCodeSigners();
                         if (pkg == null) {
-                            pkg = definePackage(packageName, manifest, jarURLConnection.getJarFileURL());
+                            definePackage(packageName, manifest, jarURLConnection.getJarFileURL());
                         } else {
                             if (pkg.isSealed() && !pkg.isSealed(jarURLConnection.getJarFileURL())) {
                                 LogWrapper.severe("The jar file %s is trying to seal already secured path %s", jarFile.getName(), packageName);
@@ -160,7 +165,7 @@ public class LaunchClassLoader extends URLClassLoader {
                 } else {
                     Package pkg = getPackage(packageName);
                     if (pkg == null) {
-                        pkg = definePackage(packageName, null, null, null, null, null, null, null);
+                        definePackage(packageName, null, null, null, null, null, null, null);
                     } else if (pkg.isSealed()) {
                         LogWrapper.severe("The URL %s is defining elements for sealed path %s", urlConnection.getURL(), packageName);
                     }
@@ -172,7 +177,7 @@ public class LaunchClassLoader extends URLClassLoader {
                 saveTransformedClass(transformedClass, transformedName);
             }
 
-            final CodeSource codeSource = urlConnection == null ? null : new CodeSource(urlConnection.getURL(), signers);
+            final CodeSource codeSource = new CodeSource(urlConnection.getURL(), signers);
             final Class<?> clazz = defineClass(transformedName, transformedClass, 0, transformedClass.length, codeSource);
             cachedClasses.put(transformedName, clazz);
             return clazz;
@@ -182,12 +187,15 @@ public class LaunchClassLoader extends URLClassLoader {
                 LogWrapper.log(Level.TRACE, e, "Exception encountered attempting classloading of %s", name);
                 LogManager.getLogger("LaunchWrapper").log(Level.ERROR, "Exception encountered attempting classloading of %s", e);
             }
+            if (e instanceof ClassNotFoundException) {
+                throw (ClassNotFoundException)e;
+            }
             throw new ClassNotFoundException(name, e);
         }
     }
 
     private void saveTransformedClass(final byte[] data, final String transformedName) {
-        if (tempFolder == null) {
+        if (tempFolder == null || data == null) {
             return;
         }
 
